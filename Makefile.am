@@ -72,6 +72,9 @@ weston_SOURCES =					\
 	src/log.c					\
 	src/compositor.c				\
 	src/compositor.h				\
+	src/compositor-drm-static.c			\
+	src/compositor-drm-static.h			\
+	src/compositor-drm.h			\
 	src/input.c					\
 	src/data-device.c				\
 	src/screenshooter.c				\
