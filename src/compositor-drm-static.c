@@ -37,14 +37,43 @@ weston_drm_backend_config_create() {
 	if(!ths)
 		return 0;
 
+	wl_list_init(&ths->outputs_list);
+
 	ths->connector = 0;
 	ths->tty = 0;
-	ths->seat_id = "seat0";
-	ths->format = 0;
-	ths->configure_output = 0;
+	ths->seat_id = NULL;
+	ths->format = NULL;
 	ths->use_pixman = false;
 
 	return ths;
+
+}
+
+void
+weston_drm_backend_config_clear_outputs_setup(struct weston_drm_backend_config * ths) {
+	struct weston_drm_backend_output_config * pos;
+	struct weston_drm_backend_output_config * tmp;
+	wl_list_for_each_safe(pos, tmp, &ths->outputs_list, link) {
+		wl_list_remove(&pos->link);
+		free(pos->name);
+		free(pos->format);
+		free(pos->seat);
+		free(pos->modeline);
+		free(pos);
+	}
+}
+
+void
+weston_drm_backend_config_destroy(struct weston_drm_backend_config * ths) {
+	if(!ths)
+		return;
+
+	free(ths->seat_id);
+	free(ths->format);
+
+	weston_drm_backend_config_clear_outputs_setup(ths);
+
+	free(ths);
 
 }
 
@@ -79,7 +108,6 @@ void
 weston_drm_backend_config_set_seat_id(
 		struct weston_drm_backend_config * ths,
 		char const * seat_id) {
-	weston_log("XXXX\n");
 	if(seat_id)
 		ths->seat_id = strdup(seat_id);
 	else
@@ -117,61 +145,49 @@ weston_drm_backend_config_get_use_current_mode(
 	return ths->use_current_mode;
 }
 
-/** Callback used to configure the outputs. This function will be called
- * by the backend when a new DRM output needs to be configured. */
 void
-weston_drm_backend_config_set_configure_output_func(
+weston_drm_backend_add_output_setup(
 		struct weston_drm_backend_config * ths,
-		weston_drm_backend_configure_output_func func) {
-	ths->configure_output = func;
-}
+		char const * name,
+		int scale,
+		uint32_t transform,
+		char const * format,
+		char const * seat,
+		enum weston_drm_backend_output_mode mode,
+		char const * modeline
+) {
 
-struct weston_backend_config *
-weston_drm_backend_config_get_weston_backend_config(
-		struct weston_drm_backend_config *ths) {
-	return &ths->base;
-}
+	/* TODO: set default values of NULL parameter */
 
-void
-weston_drm_backend_output_config_set_scale(
-		struct weston_drm_backend_output_config *ths,
-		uint32_t scale) {
-	ths->base.scale = scale;
-}
+	struct weston_drm_backend_output_config * output =
+			(__typeof__(output))zalloc(sizeof *output);
 
-void
-weston_drm_backend_output_config_set_transform(
-		struct weston_drm_backend_output_config *ths,
-		uint32_t transform) {
-	ths->base.transform = transform;
-}
+	wl_list_init(&output->link);
 
-void
-weston_drm_backend_output_config_set_format(
-		struct weston_drm_backend_output_config *ths,
-		char const * format) {
-	ths->format = strdup(format);
-}
+	output->name = strdup(name);
+	output->base.scale = scale;
+	output->base.transform = transform;
 
-void
-weston_drm_backend_output_config_set_seat(
-		struct weston_drm_backend_output_config *ths,
-		char const * seat) {
-	ths->seat = strdup(seat);
-}
+	if(format)
+		output->format = strdup(format);
 
-void
-weston_drm_backend_output_config_set_modeline(
-		struct weston_drm_backend_output_config *ths,
-		char const * modeline) {
-	ths->modeline = strdup(modeline);
+	if(seat)
+		output->seat = strdup(seat);
+
+	output->mode = mode;
+
+	if(modeline)
+		output->modeline = strdup(modeline);
+
+	wl_list_insert(&ths->outputs_list, &output->link);
+
 }
 
 /* new load function that need weston_backend_config */
 int
 weston_drm_backend_load(struct weston_compositor *compositor,
 		 int *argc, char **argv, struct weston_config *wc,
-		 struct weston_backend_config *wbc)
+		 struct weston_drm_backend_config *wbc)
 {
 	int (*backend_init)(struct weston_compositor *c,
 			    int *argc, char *argv[],
@@ -182,7 +198,9 @@ weston_drm_backend_load(struct weston_compositor *compositor,
 	if (!backend_init)
 		return -1;
 
-	return backend_init(compositor, argc, argv, wc, wbc);
+	return backend_init(compositor, argc, argv, wc, &wbc->base);
 }
+
+
 
 

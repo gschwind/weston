@@ -655,68 +655,11 @@ load_backend_old(struct weston_compositor *compositor, const char *backend,
 	return backend_init(compositor, argc, argv, wc, NULL);
 }
 
-static enum weston_drm_backend_output_mode
-drm_configure_output(struct weston_compositor *c,
-		     struct weston_drm_backend_config *backend_config,
-		     const char *name,
-		     struct weston_drm_backend_output_config *config)
-{
-	struct weston_config *wc = weston_compositor_get_user_data(c);
-	struct weston_config_section *section;
-	char *s;
-	int scale;
-	enum weston_drm_backend_output_mode mode =
-				WESTON_DRM_BACKEND_OUTPUT_PREFERRED;
-
-	section = weston_config_get_section(wc, "output", "name", name);
-	weston_config_section_get_string(section, "mode", &s, "preferred");
-	if (strcmp(s, "off") == 0) {
-		free(s);
-		return WESTON_DRM_BACKEND_OUTPUT_OFF;
-	}
-
-	if (weston_drm_backend_config_get_use_current_mode(backend_config)
-			|| strcmp(s, "current") == 0) {
-		mode = WESTON_DRM_BACKEND_OUTPUT_CURRENT;
-	} else if (strcmp(s, "preferred") != 0) {
-		weston_drm_backend_output_config_set_modeline(config, s);
-		s = NULL;
-	}
-	free(s);
-
-	weston_config_section_get_int(section, "scale", &scale, 1);
-	weston_drm_backend_output_config_set_scale(config, scale >= 1 ? scale : 1);
-	weston_config_section_get_string(section, "transform", &s, "normal");
-
-	uint32_t transform;
-	if (weston_parse_transform(s, &transform) < 0)
-		weston_log("Invalid transform \"%s\" for output %s\n",
-			   s, name);
-	else
-		weston_drm_backend_output_config_set_transform(config, transform);
-
-	free(s);
-
-
-	char * format;
-	weston_config_section_get_string(section,
-					 "gbm-format", &format, NULL);
-	if(format)
-		weston_drm_backend_output_config_set_format(config, format);
-
-	char * seat;
-	weston_config_section_get_string(section, "seat", &seat, "");
-	weston_drm_backend_output_config_set_seat(config, seat);
-
-	return mode;
-}
-
 static int
 load_drm_backend(struct weston_compositor *c, char const * backend,
 		 int *argc, char **argv, struct weston_config *wc)
 {
 	struct weston_drm_backend_config *config;
-
 	struct weston_config_section *section;
 	int ret = 0;
 
@@ -755,12 +698,77 @@ load_drm_backend(struct weston_compositor *c, char const * backend,
 	if(cf_format)
 		weston_drm_backend_config_set_format(config, cf_format);
 
-	weston_drm_backend_config_set_configure_output_func(config,
-			drm_configure_output);
+	/**
+	 * find all output section and create settings for
+	 * each of them.
+	 **/
+	char const * section_name = NULL;
+	section = NULL;
+	while(weston_config_next_section(wc, &section, &section_name)) {
+
+		if(strcmp("output", section_name) == 0) {
+			char *cf_name = NULL;
+			char *cf_mode = NULL;
+			int cf_scale = 1;
+			char *cf_transform = NULL;
+			char *cf_gbm_format = NULL;
+			char *cf_seat = NULL;
+
+			weston_config_section_get_string(section, "name", &cf_name, NULL);
+			if(!cf_name)
+				continue;
+
+			/* output setup data */
+			enum weston_drm_backend_output_mode mode;
+			char * modeline = NULL;
+			uint32_t transform = 0;
+			uint32_t scale = 0;
+
+			weston_config_section_get_string(section, "mode", &cf_mode, "preferred");
+			if (strcmp(cf_mode, "off") == 0) {
+				free(cf_mode);
+				weston_drm_backend_add_output_setup(config, cf_name, 0, 0,
+							NULL, NULL, WESTON_DRM_BACKEND_OUTPUT_OFF, NULL);
+				continue;
+			}
+
+			if (cf_use_current_mode || strcmp(cf_mode, "current") == 0) {
+				mode = WESTON_DRM_BACKEND_OUTPUT_CURRENT;
+			} else if (strcmp(cf_mode, "preferred") != 0) {
+				modeline = cf_mode;
+				modeline = NULL;
+			}
+			free(cf_mode);
+
+
+			weston_config_section_get_int(section, "scale", &cf_scale, 1);
+			scale = cf_scale >= 1 ? cf_scale : 1;
+
+			weston_config_section_get_string(section, "transform",
+					&cf_transform, "normal");
+
+			if (weston_parse_transform(cf_transform, &transform) < 0)
+				weston_log("Invalid transform \"%s\" for output %s\n",
+					   cf_transform, cf_name);
+			free(cf_transform);
+
+
+			weston_config_section_get_string(section,
+							 "gbm-format", &cf_gbm_format, NULL);
+
+			weston_config_section_get_string(section, "seat", &cf_seat, "");
+
+			weston_drm_backend_add_output_setup(config, cf_name, scale,
+					transform, cf_gbm_format, cf_seat, mode, modeline);
+
+			free(cf_name);
+			free(cf_gbm_format);
+			free(cf_seat);
+		}
+	}
 
 	/* load the actual drm backend and configure it */
-	if (weston_drm_backend_load(c, argc, argv, wc,
-			weston_drm_backend_config_get_weston_backend_config(config)) < 0) {
+	if (weston_drm_backend_load(c, argc, argv, wc, config) < 0) {
 		ret = -1;
 	}
 

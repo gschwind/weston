@@ -28,22 +28,20 @@
 #ifndef SRC_COMPOSITOR_DRM_STATIC_H_
 #define SRC_COMPOSITOR_DRM_STATIC_H_
 
+#include <wayland-util.h>
+
 struct weston_drm_backend_output_config {
 	struct weston_backend_output_config base;
 
-	/** The pixel format to be used by the output. Valid values are:
-	 * - NULL - The format set at backend creation time will be used;
-	 * - "xrgb8888";
-	 * - "rgb565"
-	 * - "xrgb2101010"
-	 */
+	struct wl_list link; /* link defined output from config file */
+
+	enum weston_drm_backend_output_mode mode;
+
+	char *name;
 	char *format;
-	/** The seat to be used by the output. Set to NULL to use the
-	 * default seat. */
 	char *seat;
-	/** The modeline to be used by the output. Refer to the documentation
-	 * of WESTON_DRM_BACKEND_OUTPUT_PREFERRED for details. */
 	char *modeline;
+
 };
 
 /** The backend configuration struct.
@@ -80,13 +78,9 @@ struct weston_drm_backend_config {
 	 * it on backend destruction. */
 	char *format;
 
-	/** Callback used to configure the outputs. This function will be called
-	 * by the backend when a new DRM output needs to be configured. */
-	enum weston_drm_backend_output_mode
-		(*configure_output)(struct weston_compositor *compositor,
-				    struct weston_drm_backend_config *backend_config,
-				    const char *name,
-				    struct weston_drm_backend_output_config *output_config);
+	/** possible outputs setup */
+	struct wl_list outputs_list;
+
 };
 
 
