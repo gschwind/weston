@@ -47,6 +47,7 @@
 
 #include "shared/helpers.h"
 #include "compositor.h"
+#include "compositor-rpi.h"
 #include "rpi-renderer.h"
 #include "launcher-util.h"
 #include "libinput-seat.h"
@@ -455,9 +456,10 @@ struct rpi_parameters {
 
 static struct rpi_backend *
 rpi_backend_create(struct weston_compositor *compositor,
-		   struct rpi_parameters *param)
+		   struct weston_rpi_backend_config *param)
 {
 	struct rpi_backend *backend;
+	struct rpi_renderer_parameters renderer_param;
 
 	weston_log("initializing Raspberry Pi backend\n");
 
@@ -490,7 +492,7 @@ rpi_backend_create(struct weston_compositor *compositor,
 
 	backend->compositor = compositor;
 	backend->prev_state = WESTON_COMPOSITOR_ACTIVE;
-	backend->single_buffer = param->renderer.single_buffer;
+	backend->single_buffer = param->single_buffer;
 
 	weston_log("Dispmanx planes are %s buffered.\n",
 		   backend->single_buffer ? "single" : "double");
@@ -506,7 +508,9 @@ rpi_backend_create(struct weston_compositor *compositor,
 	 */
 	bcm_host_init();
 
-	if (rpi_renderer_create(compositor, &param->renderer) < 0)
+	renderer_param.single_buffer = param->single_buffer;
+	renderer_param.opaque_regions = param->opaque_regions;
+	if (rpi_renderer_create(compositor, &renderer_param) < 0)
 		goto out_launcher;
 
 	if (rpi_output_create(backend, param->output_transform) < 0)
@@ -541,34 +545,20 @@ out_compositor:
 WL_EXPORT int
 backend_init(struct weston_compositor *compositor,
 	     int *argc, char *argv[],
-	     struct weston_config *config,
+	     struct weston_config *wc,
 	     struct weston_backend_config *config_base)
 {
-	const char *transform = "normal";
 	struct rpi_backend *b;
+	struct weston_rpi_backend_config config = {{ 0, }};
 
-	struct rpi_parameters param = {
-		.tty = 0, /* default to current tty */
-		.renderer.single_buffer = 0,
-		.output_transform = WL_OUTPUT_TRANSFORM_NORMAL,
-		.renderer.opaque_regions = 0,
-	};
+	if (config_base == NULL ||
+	    config_base->struct_version != WESTON_RPI_BACKEND_CONFIG_VERSION ||
+	    config_base->struct_size > sizeof(struct weston_rpi_backend_config)) {
+		weston_log("rpi backend config structure is invalid\n");
+		return -1;
+	}
 
-	const struct weston_option rpi_options[] = {
-		{ WESTON_OPTION_INTEGER, "tty", 0, &param.tty },
-		{ WESTON_OPTION_BOOLEAN, "single-buffer", 0,
-		  &param.renderer.single_buffer },
-		{ WESTON_OPTION_STRING, "transform", 0, &transform },
-		{ WESTON_OPTION_BOOLEAN, "opaque-regions", 0,
-		  &param.renderer.opaque_regions },
-	};
-
-	parse_options(rpi_options, ARRAY_LENGTH(rpi_options), argc, argv);
-
-	if (weston_parse_transform(transform, &param.output_transform) < 0)
-		weston_log("invalid transform \"%s\"\n", transform);
-
-	b = rpi_backend_create(compositor, &param);
+	b = rpi_backend_create(compositor, &config);
 	if (b == NULL)
 		return -1;
 	return 0;

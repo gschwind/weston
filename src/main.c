@@ -50,6 +50,7 @@
 #include "compositor-headless.h"
 #include "compositor-rdp.h"
 #include "compositor-fbdev.h"
+#include "compositor-rpi.h"
 
 static struct wl_list child_process_list;
 static struct weston_compositor *segv_compositor;
@@ -805,6 +806,41 @@ load_fbdev_backend(struct weston_compositor *c, char const * backend,
 }
 
 static int
+load_rpi_backend(struct weston_compositor *c, char const * backend,
+		 int *argc, char *argv[], struct weston_config *wc)
+{
+	char *transform = NULL;
+	int ret = 0;
+
+	struct weston_rpi_backend_config config = {
+		.tty = 0, /* default to current tty */
+		.single_buffer = 0,
+		.output_transform = WL_OUTPUT_TRANSFORM_NORMAL,
+		.opaque_regions = 0,
+	};
+
+	const struct weston_option rpi_options[] = {
+		{ WESTON_OPTION_INTEGER, "tty", 0, &config.tty },
+		{ WESTON_OPTION_BOOLEAN, "single-buffer", 0,
+				&config.single_buffer },
+		{ WESTON_OPTION_STRING, "transform", 0, &transform },
+		{ WESTON_OPTION_BOOLEAN, "opaque-regions", 0,
+				&config.opaque_regions },
+	};
+
+	parse_options(rpi_options, ARRAY_LENGTH(rpi_options), argc, argv);
+
+	if (transform) {
+		if (weston_parse_transform(transform, &config.output_transform) < 0)
+			weston_log("invalid transform \"%s\"\n", transform);
+		free(transform);
+	}
+
+	ret = load_backend_new(c, backend, &config.base);
+	return ret;
+}
+
+static int
 load_backend(struct weston_compositor *compositor, const char *backend,
 	     int *argc, char **argv, struct weston_config *config)
 {
@@ -814,6 +850,8 @@ load_backend(struct weston_compositor *compositor, const char *backend,
 		return load_rdp_backend(compositor, backend, argc, argv, config);
 	else if (strstr(backend, "fbdev-backend.so"))
 		return load_fbdev_backend(compositor, backend, argc, argv, config);
+	else if (strstr(backend, "rpi-backend.so"))
+		return load_rpi_backend(compositor, backend, argc, argv, config);
 #if 0
 	else if (strstr(backend, "drm-backend.so"))
 		return load_drm_backend(compositor, backend, argc, argv, config);
@@ -821,8 +859,6 @@ load_backend(struct weston_compositor *compositor, const char *backend,
 		return load_wayland_backend(compositor, backend, argc, argv, config);
 	else if (strstr(backend, "x11-backend.so"))
 		return load_x11_backend(compositor, backend, argc, argv, config);
-	else if (strstr(backend, "rpi-backend.so"))
-		return load_rpi_backend(compositor, backend, argc, argv, config);
 #endif
 
 	return load_backend_old(compositor, backend, argc, argv, config);
