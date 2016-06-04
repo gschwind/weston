@@ -593,6 +593,52 @@ buffer_state_handle_buffer_destroy(struct wl_listener *listener, void *data)
 }
 
 static void
+pixman_renderer_attach_memory(struct weston_surface *es, struct weston_buffer *buffer)
+{
+	struct pixman_surface_state *ps = get_surface_state(es);
+	struct weston_memory_buffer *mem_buffer;
+	pixman_format_code_t pixman_format;
+
+	mem_buffer = buffer->mem_buffer;
+
+	if (! mem_buffer) {
+		weston_log("Pixman renderer supports only SHM buffers\n");
+		weston_buffer_reference(&ps->buffer_ref, NULL);
+		return;
+	}
+
+	switch (mem_buffer->format) {
+	case WL_SHM_FORMAT_XRGB8888:
+		pixman_format = PIXMAN_x8r8g8b8;
+		break;
+	case WL_SHM_FORMAT_ARGB8888:
+		pixman_format = PIXMAN_a8r8g8b8;
+		break;
+	case WL_SHM_FORMAT_RGB565:
+		pixman_format = PIXMAN_r5g6b5;
+		break;
+	default:
+		weston_log("Unsupported SHM buffer format\n");
+		weston_buffer_reference(&ps->buffer_ref, NULL);
+		return;
+	break;
+	}
+
+	buffer->width = mem_buffer->width;
+	buffer->height = mem_buffer->height;
+
+	ps->image = pixman_image_create_bits(pixman_format,
+		buffer->width, buffer->height,
+		mem_buffer->data,
+		mem_buffer->stride);
+
+	ps->buffer_destroy_listener.notify =
+		buffer_state_handle_buffer_destroy;
+	wl_signal_add(&buffer->destroy_signal,
+		      &ps->buffer_destroy_listener);
+}
+
+static void
 pixman_renderer_attach(struct weston_surface *es, struct weston_buffer *buffer)
 {
 	struct pixman_surface_state *ps = get_surface_state(es);
@@ -613,6 +659,11 @@ pixman_renderer_attach(struct weston_surface *es, struct weston_buffer *buffer)
 
 	if (!buffer)
 		return;
+
+	if(!buffer->resource) {
+		pixman_renderer_attach_memory(es, buffer);
+		return;
+	}
 
 	shm_buffer = wl_shm_buffer_get(buffer->resource);
 
