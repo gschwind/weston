@@ -782,7 +782,7 @@ x11_backend_create_output(struct x11_backend *b, int x, int y,
 {
 	static const char name[] = "Weston Compositor";
 	static const char class[] = "weston-1\0Weston Compositor";
-	char title[32];
+	char * title = NULL;
 	struct x11_output *output;
 	xcb_screen_t *screen;
 	struct wm_normal_hints normal_hints;
@@ -799,11 +799,6 @@ x11_backend_create_output(struct x11_backend *b, int x, int y,
 
 	output_width = width * scale;
 	output_height = height * scale;
-
-	if (configured_name)
-		sprintf(title, "%s - %s", name, configured_name);
-	else
-		strcpy(title, name);
 
 	if (!no_input)
 		values[0] |=
@@ -871,9 +866,25 @@ x11_backend_create_output(struct x11_backend *b, int x, int y,
 	}
 
 	/* Set window name.  Don't bother with non-EWMH WMs. */
-	xcb_change_property(b->conn, XCB_PROP_MODE_REPLACE, output->window,
-			    b->atom.net_wm_name, b->atom.utf8_string, 8,
-			    strlen(title), title);
+	if (configured_name) {
+		ret = asprintf(&title, "%s - %s", name, configured_name);
+		 /* following asprintf manual, title is undefined on failure,
+		  * thus force NULL */
+		if (ret < 0)
+			title = NULL;
+	} else {
+		title = strdup(name);
+	}
+
+	if(title) {
+		xcb_change_property(b->conn, XCB_PROP_MODE_REPLACE, output->window,
+				    b->atom.net_wm_name, b->atom.utf8_string, 8,
+				    strlen(title), title);
+		free(title);
+	} else {
+		return NULL;
+	}
+
 	xcb_change_property(b->conn, XCB_PROP_MODE_REPLACE, output->window,
 			    b->atom.wm_class, b->atom.string, 8,
 			    sizeof class, class);
