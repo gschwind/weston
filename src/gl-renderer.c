@@ -3052,6 +3052,7 @@ gl_renderer_create(struct weston_compositor *ec, EGLenum platform,
 	gr->base.read_pixels = gl_renderer_read_pixels;
 	gr->base.repaint_output = gl_renderer_repaint_output;
 	gr->base.flush_damage = gl_renderer_flush_damage;
+	gr->base.flush_damage_memory = gl_renderer_flush_damage_memory;
 	gr->base.attach = gl_renderer_attach;
 	gr->base.surface_set_color = gl_renderer_surface_set_color;
 	gr->base.destroy = gl_renderer_destroy;

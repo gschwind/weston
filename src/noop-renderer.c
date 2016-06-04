@@ -50,6 +50,11 @@ noop_renderer_flush_damage(struct weston_surface *surface)
 }
 
 static void
+noop_renderer_flush_damage_memory(struct weston_surface *surface)
+{
+}
+
+static void
 noop_renderer_attach_memory(struct weston_surface *es, struct weston_buffer *buffer)
 {
 	struct weston_memory_buffer *mem_buffer;
@@ -146,6 +151,7 @@ noop_renderer_init(struct weston_compositor *ec)
 	renderer->read_pixels = noop_renderer_read_pixels;
 	renderer->repaint_output = noop_renderer_repaint_output;
 	renderer->flush_damage = noop_renderer_flush_damage;
+	renderer->flush_damage_memory = noop_renderer_flush_damage_memory;
 	renderer->attach = noop_renderer_attach;
 	renderer->surface_set_color = noop_renderer_surface_set_color;
 	renderer->destroy = noop_renderer_destroy;

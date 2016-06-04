@@ -627,6 +627,7 @@ struct weston_renderer {
 	void (*repaint_output)(struct weston_output *output,
 			       pixman_region32_t *output_damage);
 	void (*flush_damage)(struct weston_surface *surface);
+	void (*flush_damage_memory)(struct weston_surface *surface);
 	void (*attach)(struct weston_surface *es, struct weston_buffer *buffer);
 	void (*surface_set_color)(struct weston_surface *surface,
 			       float red, float green,

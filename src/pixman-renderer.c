@@ -577,6 +577,12 @@ pixman_renderer_flush_damage(struct weston_surface *surface)
 }
 
 static void
+pixman_renderer_flush_damage_memory(struct weston_surface *surface)
+{
+	/* No-op for pixman renderer */
+}
+
+static void
 buffer_state_handle_buffer_destroy(struct wl_listener *listener, void *data)
 {
 	struct pixman_surface_state *ps;
@@ -599,13 +605,7 @@ pixman_renderer_attach_memory(struct weston_surface *es, struct weston_buffer *b
 	struct weston_memory_buffer *mem_buffer;
 	pixman_format_code_t pixman_format;
 
-	mem_buffer = buffer->mem_buffer;
-
-	if (! mem_buffer) {
-		weston_log("Pixman renderer supports only SHM buffers\n");
-		weston_buffer_reference(&ps->buffer_ref, NULL);
-		return;
-	}
+	mem_buffer = buffer->xmem_buffer;
 
 	switch (mem_buffer->format) {
 	case WL_SHM_FORMAT_XRGB8888:
@@ -624,6 +624,7 @@ pixman_renderer_attach_memory(struct weston_surface *es, struct weston_buffer *b
 	break;
 	}
 
+	buffer->mem_buffer = mem_buffer;
 	buffer->width = mem_buffer->width;
 	buffer->height = mem_buffer->height;
 
@@ -888,6 +889,7 @@ pixman_renderer_init(struct weston_compositor *ec)
 	renderer->base.read_pixels = pixman_renderer_read_pixels;
 	renderer->base.repaint_output = pixman_renderer_repaint_output;
 	renderer->base.flush_damage = pixman_renderer_flush_damage;
+	renderer->base.flush_damage_memory = pixman_renderer_flush_damage_memory;
 	renderer->base.attach = pixman_renderer_attach;
 	renderer->base.surface_set_color = pixman_renderer_surface_set_color;
 	renderer->base.destroy = pixman_renderer_destroy;

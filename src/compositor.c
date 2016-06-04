@@ -1882,6 +1882,7 @@ weston_buffer_from_memory(int32_t width, int32_t height, int32_t stride,
 	buffer->resource = NULL;
 	buffer->xmem_buffer = mem_buffer;
 	wl_signal_init(&buffer->destroy_signal);
+	wl_list_init(&buffer->destroy_listener.link);
 	buffer->y_inverted = 1;
 
 	return buffer;
@@ -1992,6 +1993,10 @@ surface_flush_damage(struct weston_surface *surface)
 	if (surface->buffer_ref.buffer &&
 	    wl_shm_buffer_get(surface->buffer_ref.buffer->resource))
 		surface->compositor->renderer->flush_damage(surface);
+
+	if (surface->buffer_ref.buffer &&
+	    !surface->buffer_ref.buffer->resource)
+		surface->compositor->renderer->flush_damage_memory(surface);
 
 	if (weston_timeline_enabled_ &&
 	    pixman_region32_not_empty(&surface->damage))
