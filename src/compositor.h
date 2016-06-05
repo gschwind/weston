@@ -627,6 +627,7 @@ struct weston_renderer {
 	void (*repaint_output)(struct weston_output *output,
 			       pixman_region32_t *output_damage);
 	void (*flush_damage)(struct weston_surface *surface);
+	void (*flush_damage_memory)(struct weston_surface *surface);
 	void (*attach)(struct weston_surface *es, struct weston_buffer *buffer);
 	void (*surface_set_color)(struct weston_surface *surface,
 			       float red, float green,
@@ -805,14 +806,23 @@ struct weston_compositor {
 	void (*exit)(struct weston_compositor *c);
 };
 
+struct weston_memory_buffer {
+	int32_t width, height;
+	int32_t stride;
+	uint32_t format;
+	void * data;
+};
+
 struct weston_buffer {
 	struct wl_resource *resource;
+	struct weston_memory_buffer *xmem_buffer;
 	struct wl_signal destroy_signal;
 	struct wl_listener destroy_listener;
 
 	union {
 		struct wl_shm_buffer *shm_buffer;
 		void *legacy_buffer;
+		struct weston_memory_buffer * mem_buffer;
 	};
 	int32_t width, height;
 	uint32_t busy_count;
@@ -1251,6 +1261,8 @@ weston_output_damage(struct weston_output *output);
 void
 weston_compositor_schedule_repaint(struct weston_compositor *compositor);
 void
+weston_surface_commit(struct weston_surface *surface);
+void
 weston_compositor_fade(struct weston_compositor *compositor, float tint);
 void
 weston_compositor_damage_all(struct weston_compositor *compositor);
@@ -1453,11 +1465,19 @@ weston_surface_copy_content(struct weston_surface *surface,
 			    int width, int height);
 
 struct weston_buffer *
+weston_buffer_from_memory(int32_t width, int32_t height, int32_t stride,
+			  uint32_t format, void * data);
+
+struct weston_buffer *
 weston_buffer_from_resource(struct wl_resource *resource);
 
 void
 weston_buffer_reference(struct weston_buffer_reference *ref,
 			struct weston_buffer *buffer);
+
+void
+weston_surface_attach(struct weston_surface *surface,
+		      struct weston_buffer *buffer);
 
 uint32_t
 weston_compositor_get_time(void);

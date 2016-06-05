@@ -90,7 +90,8 @@ enum buffer_type {
 	BUFFER_TYPE_NULL,
 	BUFFER_TYPE_SOLID, /* internal solid color surfaces without a buffer */
 	BUFFER_TYPE_SHM,
-	BUFFER_TYPE_EGL
+	BUFFER_TYPE_EGL,
+	BUFFER_TYPE_MEM
 };
 
 struct gl_renderer;
@@ -1317,6 +1318,92 @@ done:
 }
 
 static void
+gl_renderer_flush_damage_memory(struct weston_surface *surface)
+{
+	struct gl_renderer *gr = get_renderer(surface->compositor);
+	struct gl_surface_state *gs = get_surface_state(surface);
+	struct weston_buffer *buffer = gs->buffer_ref.buffer;
+	struct weston_view *view;
+	bool texture_used;
+
+#ifdef GL_EXT_unpack_subimage
+	pixman_box32_t *rectangles;
+	void *data;
+	int i, n;
+#endif
+
+	pixman_region32_union(&gs->texture_damage,
+			      &gs->texture_damage, &surface->damage);
+
+	if (!buffer)
+		return;
+
+	/* Avoid upload, if the texture won't be used this time.
+	 * We still accumulate the damage in texture_damage, and
+	 * hold the reference to the buffer, in case the surface
+	 * migrates back to the primary plane.
+	 */
+	texture_used = false;
+	wl_list_for_each(view, &surface->views, surface_link) {
+		if (view->plane == &surface->compositor->primary_plane) {
+			texture_used = true;
+			break;
+		}
+	}
+	if (!texture_used)
+		return;
+
+	if (!pixman_region32_not_empty(&gs->texture_damage) &&
+	    !gs->needs_full_upload)
+		goto done;
+
+	glBindTexture(GL_TEXTURE_2D, gs->textures[0]);
+
+	if (!gr->has_unpack_subimage) {
+		glTexImage2D(GL_TEXTURE_2D, 0, gs->gl_format,
+			     gs->pitch, buffer->height, 0,
+			     gs->gl_format, gs->gl_pixel_type,
+			     buffer->mem_buffer->data);
+
+		goto done;
+	}
+
+#ifdef GL_EXT_unpack_subimage
+	glPixelStorei(GL_UNPACK_ROW_LENGTH_EXT, gs->pitch);
+	data = buffer->mem_buffer->data;
+
+	if (gs->needs_full_upload) {
+		glPixelStorei(GL_UNPACK_SKIP_PIXELS_EXT, 0);
+		glPixelStorei(GL_UNPACK_SKIP_ROWS_EXT, 0);
+		glTexImage2D(GL_TEXTURE_2D, 0, gs->gl_format,
+			     gs->pitch, buffer->height, 0,
+			     gs->gl_format, gs->gl_pixel_type, data);
+		goto done;
+	}
+
+	rectangles = pixman_region32_rectangles(&gs->texture_damage, &n);
+	for (i = 0; i < n; i++) {
+		pixman_box32_t r;
+
+		r = weston_surface_to_buffer_rect(surface, rectangles[i]);
+
+		glPixelStorei(GL_UNPACK_SKIP_PIXELS_EXT, r.x1);
+		glPixelStorei(GL_UNPACK_SKIP_ROWS_EXT, r.y1);
+		glTexSubImage2D(GL_TEXTURE_2D, 0, r.x1, r.y1,
+				r.x2 - r.x1, r.y2 - r.y1,
+				gs->gl_format, gs->gl_pixel_type, data);
+	}
+#endif
+
+done:
+	pixman_region32_fini(&gs->texture_damage);
+	pixman_region32_init(&gs->texture_damage);
+	gs->needs_full_upload = false;
+
+	weston_buffer_reference(&gs->buffer_ref, NULL);
+}
+
+static void
 ensure_textures(struct gl_surface_state *gs, int num_textures)
 {
 	int i;
@@ -1334,6 +1421,68 @@ ensure_textures(struct gl_surface_state *gs, int num_textures)
 	}
 	gs->num_textures = num_textures;
 	glBindTexture(gs->target, 0);
+}
+
+static void
+gl_renderer_attach_memory(struct weston_surface *es, struct weston_buffer *buffer,
+		       struct weston_memory_buffer *mem_buffer)
+{
+	struct weston_compositor *ec = es->compositor;
+	struct gl_renderer *gr = get_renderer(ec);
+	struct gl_surface_state *gs = get_surface_state(es);
+	GLenum gl_format, gl_pixel_type;
+	int pitch;
+
+	buffer->mem_buffer = mem_buffer;
+	buffer->width = mem_buffer->width;
+	buffer->height = mem_buffer->height;
+
+	switch (mem_buffer->format) {
+	case WL_SHM_FORMAT_XRGB8888:
+		gs->shader = &gr->texture_shader_rgbx;
+		pitch = mem_buffer->stride / 4;
+		gl_format = GL_BGRA_EXT;
+		gl_pixel_type = GL_UNSIGNED_BYTE;
+		break;
+	case WL_SHM_FORMAT_ARGB8888:
+		gs->shader = &gr->texture_shader_rgba;
+		pitch = mem_buffer->stride / 4;
+		gl_format = GL_BGRA_EXT;
+		gl_pixel_type = GL_UNSIGNED_BYTE;
+		break;
+	case WL_SHM_FORMAT_RGB565:
+		gs->shader = &gr->texture_shader_rgbx;
+		pitch = mem_buffer->stride / 2;
+		gl_format = GL_RGB;
+		gl_pixel_type = GL_UNSIGNED_SHORT_5_6_5;
+		break;
+	default:
+		weston_log("warning: unknown shm buffer format: %08x\n",
+			   mem_buffer->format);
+		return;
+	}
+
+	/* Only allocate a texture if it doesn't match existing one.
+	 * If a switch from DRM allocated buffer to a SHM buffer is
+	 * happening, we need to allocate a new texture buffer. */
+	if (pitch != gs->pitch ||
+	    buffer->height != gs->height ||
+	    gl_format != gs->gl_format ||
+	    gl_pixel_type != gs->gl_pixel_type ||
+	    gs->buffer_type != BUFFER_TYPE_MEM) {
+		gs->pitch = pitch;
+		gs->height = buffer->height;
+		gs->target = GL_TEXTURE_2D;
+		gs->gl_format = gl_format;
+		gs->gl_pixel_type = gl_pixel_type;
+		gs->buffer_type = BUFFER_TYPE_MEM;
+		gs->needs_full_upload = true;
+		gs->y_inverted = 1;
+
+		gs->surface = es;
+
+		ensure_textures(gs, 1);
+	}
 }
 
 static void
@@ -1908,6 +2057,11 @@ gl_renderer_attach(struct weston_surface *es, struct weston_buffer *buffer)
 		return;
 	}
 
+	if (!buffer->resource) {
+		gl_renderer_attach_memory(es, buffer, buffer->xmem_buffer);
+		return;
+	}
+
 	shm_buffer = wl_shm_buffer_get(buffer->resource);
 
 	if (shm_buffer)
@@ -2023,6 +2177,9 @@ gl_renderer_surface_copy_content(struct weston_surface *surface,
 		gl_renderer_flush_damage(surface);
 		/* fall through */
 	case BUFFER_TYPE_EGL:
+		break;
+	case BUFFER_TYPE_MEM:
+		gl_renderer_flush_damage_memory(surface);
 		break;
 	}
 
@@ -2895,6 +3052,7 @@ gl_renderer_create(struct weston_compositor *ec, EGLenum platform,
 	gr->base.read_pixels = gl_renderer_read_pixels;
 	gr->base.repaint_output = gl_renderer_repaint_output;
 	gr->base.flush_damage = gl_renderer_flush_damage;
+	gr->base.flush_damage_memory = gl_renderer_flush_damage_memory;
 	gr->base.attach = gl_renderer_attach;
 	gr->base.surface_set_color = gl_renderer_surface_set_color;
 	gr->base.destroy = gl_renderer_destroy;

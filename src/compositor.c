@@ -1850,7 +1850,42 @@ weston_buffer_destroy_handler(struct wl_listener *listener, void *data)
 		container_of(listener, struct weston_buffer, destroy_listener);
 
 	wl_signal_emit(&buffer->destroy_signal, buffer);
+
+	if(!buffer->resource)
+		free(buffer->mem_buffer);
 	free(buffer);
+}
+
+WL_EXPORT struct weston_buffer *
+weston_buffer_from_memory(int32_t width, int32_t height, int32_t stride,
+			  uint32_t format, void * data)
+{
+	struct weston_buffer *buffer;
+	struct weston_memory_buffer *mem_buffer;
+
+	buffer = zalloc(sizeof *buffer);
+	if (buffer == NULL)
+		return NULL;
+
+	mem_buffer = zalloc(sizeof *mem_buffer);
+	if (mem_buffer == NULL) {
+		free(buffer);
+		return NULL;
+	}
+
+	mem_buffer->width = width;
+	mem_buffer->height = height;
+	mem_buffer->stride = stride;
+	mem_buffer->format = format;
+	mem_buffer->data = data;
+
+	buffer->resource = NULL;
+	buffer->xmem_buffer = mem_buffer;
+	wl_signal_init(&buffer->destroy_signal);
+	wl_list_init(&buffer->destroy_listener.link);
+	buffer->y_inverted = 1;
+
+	return buffer;
 }
 
 WL_EXPORT struct weston_buffer *
@@ -1897,7 +1932,7 @@ weston_buffer_reference(struct weston_buffer_reference *ref,
 {
 	if (ref->buffer && buffer != ref->buffer) {
 		ref->buffer->busy_count--;
-		if (ref->buffer->busy_count == 0) {
+		if (ref->buffer->busy_count == 0 && ref->buffer->resource) {
 			assert(wl_resource_get_client(ref->buffer->resource));
 			wl_resource_queue_event(ref->buffer->resource,
 						WL_BUFFER_RELEASE);
@@ -1915,7 +1950,7 @@ weston_buffer_reference(struct weston_buffer_reference *ref,
 	ref->destroy_listener.notify = weston_buffer_reference_handle_destroy;
 }
 
-static void
+WL_EXPORT void
 weston_surface_attach(struct weston_surface *surface,
 		      struct weston_buffer *buffer)
 {
@@ -1958,6 +1993,10 @@ surface_flush_damage(struct weston_surface *surface)
 	if (surface->buffer_ref.buffer &&
 	    wl_shm_buffer_get(surface->buffer_ref.buffer->resource))
 		surface->compositor->renderer->flush_damage(surface);
+
+	if (surface->buffer_ref.buffer &&
+	    !surface->buffer_ref.buffer->resource)
+		surface->compositor->renderer->flush_damage_memory(surface);
 
 	if (weston_timeline_enabled_ &&
 	    pixman_region32_not_empty(&surface->damage))
@@ -2769,7 +2808,7 @@ weston_surface_commit_state(struct weston_surface *surface,
 	wl_list_init(&state->feedback_list);
 }
 
-static void
+WL_EXPORT void
 weston_surface_commit(struct weston_surface *surface)
 {
 	weston_surface_commit_state(surface, &surface->pending);

@@ -577,6 +577,12 @@ pixman_renderer_flush_damage(struct weston_surface *surface)
 }
 
 static void
+pixman_renderer_flush_damage_memory(struct weston_surface *surface)
+{
+	/* No-op for pixman renderer */
+}
+
+static void
 buffer_state_handle_buffer_destroy(struct wl_listener *listener, void *data)
 {
 	struct pixman_surface_state *ps;
@@ -590,6 +596,47 @@ buffer_state_handle_buffer_destroy(struct wl_listener *listener, void *data)
 	}
 
 	ps->buffer_destroy_listener.notify = NULL;
+}
+
+static void
+pixman_renderer_attach_memory(struct weston_surface *es, struct weston_buffer *buffer)
+{
+	struct pixman_surface_state *ps = get_surface_state(es);
+	struct weston_memory_buffer *mem_buffer;
+	pixman_format_code_t pixman_format;
+
+	mem_buffer = buffer->xmem_buffer;
+
+	switch (mem_buffer->format) {
+	case WL_SHM_FORMAT_XRGB8888:
+		pixman_format = PIXMAN_x8r8g8b8;
+		break;
+	case WL_SHM_FORMAT_ARGB8888:
+		pixman_format = PIXMAN_a8r8g8b8;
+		break;
+	case WL_SHM_FORMAT_RGB565:
+		pixman_format = PIXMAN_r5g6b5;
+		break;
+	default:
+		weston_log("Unsupported SHM buffer format\n");
+		weston_buffer_reference(&ps->buffer_ref, NULL);
+		return;
+	break;
+	}
+
+	buffer->mem_buffer = mem_buffer;
+	buffer->width = mem_buffer->width;
+	buffer->height = mem_buffer->height;
+
+	ps->image = pixman_image_create_bits(pixman_format,
+		buffer->width, buffer->height,
+		mem_buffer->data,
+		mem_buffer->stride);
+
+	ps->buffer_destroy_listener.notify =
+		buffer_state_handle_buffer_destroy;
+	wl_signal_add(&buffer->destroy_signal,
+		      &ps->buffer_destroy_listener);
 }
 
 static void
@@ -613,6 +660,11 @@ pixman_renderer_attach(struct weston_surface *es, struct weston_buffer *buffer)
 
 	if (!buffer)
 		return;
+
+	if(!buffer->resource) {
+		pixman_renderer_attach_memory(es, buffer);
+		return;
+	}
 
 	shm_buffer = wl_shm_buffer_get(buffer->resource);
 
@@ -837,6 +889,7 @@ pixman_renderer_init(struct weston_compositor *ec)
 	renderer->base.read_pixels = pixman_renderer_read_pixels;
 	renderer->base.repaint_output = pixman_renderer_repaint_output;
 	renderer->base.flush_damage = pixman_renderer_flush_damage;
+	renderer->base.flush_damage_memory = pixman_renderer_flush_damage_memory;
 	renderer->base.attach = pixman_renderer_attach;
 	renderer->base.surface_set_color = pixman_renderer_surface_set_color;
 	renderer->base.destroy = pixman_renderer_destroy;

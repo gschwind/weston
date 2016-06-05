@@ -50,6 +50,41 @@ noop_renderer_flush_damage(struct weston_surface *surface)
 }
 
 static void
+noop_renderer_flush_damage_memory(struct weston_surface *surface)
+{
+}
+
+static void
+noop_renderer_attach_memory(struct weston_surface *es, struct weston_buffer *buffer)
+{
+	struct weston_memory_buffer *mem_buffer;
+	uint8_t *data;
+	uint32_t size, i, width, height, stride;
+	volatile unsigned char unused = 0; /* volatile so it's not optimized out */
+
+	mem_buffer = buffer->mem_buffer;
+
+	data = mem_buffer->data;
+	stride = mem_buffer->stride;
+	width = mem_buffer->width;
+	height = mem_buffer->height;
+	size = stride * height;
+
+	/* Access the buffer data to make sure the buffer's client gets killed
+	 * if the buffer size is invalid. This makes the bad_buffer test pass.
+	 * This can be removed if we start reading the buffer contents
+	 * somewhere else, e.g. in repaint_output(). */
+	//wl_shm_buffer_begin_access(mem_buffer);
+	for (i = 0; i < size; i++)
+		unused ^= data[i];
+	//wl_shm_buffer_end_access(mem_buffer);
+
+	buffer->shm_buffer = mem_buffer;
+	buffer->width = width;
+	buffer->height = height;
+}
+
+static void
 noop_renderer_attach(struct weston_surface *es, struct weston_buffer *buffer)
 {
 	struct wl_shm_buffer *shm_buffer;
@@ -59,6 +94,10 @@ noop_renderer_attach(struct weston_surface *es, struct weston_buffer *buffer)
 
 	if (!buffer)
 		return;
+
+	if (!buffer->resource) {
+		noop_renderer_attach_memory(es, buffer);
+	}
 
 	shm_buffer = wl_shm_buffer_get(buffer->resource);
 
@@ -112,6 +151,7 @@ noop_renderer_init(struct weston_compositor *ec)
 	renderer->read_pixels = noop_renderer_read_pixels;
 	renderer->repaint_output = noop_renderer_repaint_output;
 	renderer->flush_damage = noop_renderer_flush_damage;
+	renderer->flush_damage_memory = noop_renderer_flush_damage_memory;
 	renderer->attach = noop_renderer_attach;
 	renderer->surface_set_color = noop_renderer_surface_set_color;
 	renderer->destroy = noop_renderer_destroy;
